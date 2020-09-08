@@ -3,6 +3,7 @@ from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Activation
 from tensorflow.keras.models import Model
 
+
 model_dict = {
     'vgg16'         : tf.keras.applications.VGG16,
     'vgg19'         : tf.keras.applications.VGG19,
@@ -17,67 +18,57 @@ model_dict = {
     'densenet169'   : tf.keras.applications.DenseNet169, # 224
     'densenet201'   : tf.keras.applications.DenseNet201, # 224
 }
+   
 
-class MoCo(tf.keras.Model):
-    def __init__(self, backbone, dim=128, K=65536, m=.999, T=.07, mlp=False):
-        super(MoCo, self).__init__()
+def create_model(
+    logger, 
+    backbone='resnet50',
+    img_size=224,
+    dim=128, 
+    K=65536,
+    mlp=False,
+    snapshot=None):
 
-        self.K = K
-        self.m = m
-        self.T = T
-
-        base_encoder = model_dict[backbone](include_top=False, weights=None)
-        if mlp:
-            x = Dense(512, name='fc1')(base_encoder.output)
-            x = Activation('relu', name='fc1_relu')(x)
-            x = Dense(dim, name='fc')(x)
-        else:
-            x = Dense(dim, name='fc')(base_encoder.output)
-        
-        self.encoder_q = tf.keras.models.Model(base_encoder.input, x, name='encoder')    
-        self.encoder_k = tf.keras.models.clone_model(self.encoder_q)
-        for i in range(len(self.encoder_q.layers)):
-            self.encoder_k.get_layer(index=i).set_weights(
-                self.encoder_q.get_layer(index=i).get_weights()
-            )
-        self.encoder_k.trainable = False
-
-    def _momentum_update_key_encoder(self):
-        for i in range(len(self.encoder_q.layers)):
-            param_q = self.encoder_q.get_layer(index=i).get_weights()
-            param_k = self.encoder_k.get_layer(index=i).get_weights()
-            self.encoder_k.get_layer(index=i).set_weights(
-                [param_k[j] * m + param_q[j] * (1. - m) for j in range(len(param_q))]
-            )
-            
-    def call(self, inputs, training=False):
-        im_q, im_k = inputs
-        
-
-
-
-def create_model(args, logger):
-
-    backbone = model_dict[args.backbone](
+    base_encoder = model_dict[backbone](
         include_top=False,
         pooling='avg',
         weights=None,
-        input_shape=(args.img_size, args.img_size, 3))
+        input_shape=(img_size, img_size, 3))
 
-    def _softmax(x):
-        return tf.math.exp(x/args.temperature) / tf.math.reduce_sum(tf.math.exp(x/args.temperature))
+    x = Dense(dim)(base_encoder.output)
+    if mlp:
+        x = Activation('relu')(x)
+        x = Dense(dim)(x)
+    
+    encoder_q = Model(base_encoder.input, x, name='encoder_q_{}'.format(backbone))
+    encoder_k = Model(base_encoder.input, x, name='encoder_k_{}'.format(backbone))
 
-    x = Dense(args.classes)(backbone.output)
-    x = Lambda(_softmax, name='main_output')(x)
-        
-    q_encoder = Model(backbone.input, x, name=args.backbone)
-    k_encoder = tf.keras.models.clone_model(q_encoder)
+    for i in range(len(encoder_q.layers)):
+        encoder_k.get_layer(index=i).set_weights(
+            encoder_q.get_layer(index=i).get_weights())
+    encoder_k.trainable = False
 
-    if args.snapshot:
-        model.load_weights(args.snapshot)
-        logger.info('Load weights at {}'.format(args.snapshot))
-        
-    return model
+    if snapshot:
+        encoder_q.load_weights(snapshot)
+        encoder_k.load_weights(snapshot.replace('/query/', '/key/'))
+        logger.info('Load weights at {}'.format(snapshot))
+    
+    # queue
+    queue = tf.random.normal(shape=[K, dim])
+    queue /= tf.norm(queue, ord=2, axis=0)
+    return encoder_q, encoder_k, queue
 
-def momentum_update_model(args, encoder, m_encoder):
-    pass
+
+def momentum_update_model(encoder_q, encoder_k, m=0.999):
+    for i in range(len(encoder_q.layers)):
+        param_q = encoder_q.get_layer(index=i).get_weights()
+        param_k = encoder_k.get_layer(index=i).get_weights()
+        encoder_k.get_layer(index=i).set_weights(
+            [param_k[j] * m + param_q[j] * (1. - m) for j in range(len(param_q))])
+    return encoder_k
+
+
+def enqueue(queue, new_keys, K=65536):
+    queue = tf.concat([new_keys, queue], axis=0)
+    queue = queue[:K]
+    return queue
