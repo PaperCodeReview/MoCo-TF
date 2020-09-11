@@ -29,19 +29,22 @@ def create_model(
     mlp=False,
     snapshot=None):
 
-    base_encoder = model_dict[backbone](
-        include_top=False,
-        pooling='avg',
-        weights=None,
-        input_shape=(img_size, img_size, 3))
+    def _get_architecture(name=None):
+        base_encoder = model_dict[backbone](
+            include_top=False,
+            pooling='avg',
+            weights=None,
+            input_shape=(img_size, img_size, 3))
 
-    x = Dense(dim)(base_encoder.output)
-    if mlp:
-        x = Activation('relu')(x)
-        x = Dense(dim)(x)
+        x = Dense(dim)(base_encoder.output)
+        if mlp:
+            x = Activation('relu')(x)
+            x = Dense(dim)(x)
+        arch = Model(base_encoder.input, x, name=name)
+        return arch
     
-    encoder_q = Model(base_encoder.input, x, name='encoder_q_{}'.format(backbone))
-    encoder_k = Model(base_encoder.input, x, name='encoder_k_{}'.format(backbone))
+    encoder_q = _get_architecture('encoder_q_{}'.format(backbone))
+    encoder_k = _get_architecture('encoder_k_{}'.format(backbone))
 
     for i in range(len(encoder_q.layers)):
         encoder_k.get_layer(index=i).set_weights(
