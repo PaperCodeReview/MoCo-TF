@@ -139,9 +139,13 @@ def main(args=None):
             loss_mean = tf.nn.compute_average_loss(loss, global_batch_size=args.batch_size)
             return logits, loss, loss_mean
 
-
         def step_fn(from_iter):
-            img_q, img_k = from_iter['query'], from_iter['key']
+            if args.shuffle_bn:
+                x, unshuffle_idx = from_iter
+                img_q, img_k = x['query'], x['key']
+            else:
+                img_q, img_k = from_iter['query'], from_iter['key']
+
             N = tf.shape(img_q)[0]
             K = tf.shape(queue)[0]
             C = tf.shape(queue)[1]
@@ -187,7 +191,8 @@ def main(args=None):
         encoder_q.trainable = True
         progBar_train = tf.keras.utils.Progbar(steps_per_epoch, stateful_metrics=metrics.keys())
         for step in range(steps_per_epoch):
-            queue = do_step(train_iterator, 'train', queue)encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
+            queue = do_step(train_iterator, 'train', queue)
+            encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
             progBar_train.update(step, values=[(k, v.result()) for k, v in metrics.items() if not 'val' in k])
             
             if args.tensorboard and args.tb_interval > 0:
