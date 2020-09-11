@@ -64,12 +64,17 @@ class DataLoader:
         return {'query': query, 'key': key}
 
     def shuffle_BN(self, value):
-        if self.num_workers == 1:
-            new_key = value['key'][::-1]
-        else:
-            new_key = tf.concat([value['key'][self.group:], value['key'][:self.group]], axis=0)
-        value['key'] = new_key
-        return value
+        if self.num_workers > 1:
+            pre_shuffle = [(i, value['key'][i]) for i in range(self.batch_size)]
+            random.shuffle(pre_shuffle)
+            shuffle_idx = []
+            value_temp = []
+            for vv in pre_shuffle:
+                shuffle_idx.append(vv[0])
+                value_temp.append(tf.expand_dims(vv[1], axis=0))
+            value['key'] = tf.concat(value_temp, axis=0)
+            unshuffle_idx = np.array(shuffle_idx).argsort().tolist()
+        return (value, unshuffle_idx)
         
     def _dataloader(self):
         dataset = tf.data.Dataset.from_tensor_slices(self.imglist)
@@ -80,7 +85,7 @@ class DataLoader:
         dataset = dataset.interleave(self.fetch_dataset, num_parallel_calls=AUTO)
         dataset = dataset.map(self.dataset_parser, num_parallel_calls=AUTO)
         dataset = dataset.batch(self.batch_size)
+        dataset = dataset.prefetch(AUTO)
         if self.args.shuffle_bn:
             dataset = dataset.map(self.shuffle_BN, num_parallel_calls=AUTO)
-        dataset = dataset.prefetch(AUTO)
         return dataset

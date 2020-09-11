@@ -19,7 +19,6 @@ import tensorflow as tf
 
 
 def main(args=None):
-    assert args
     set_seed()
     args, initial_epoch = search_same(args)
     if initial_epoch == -1:
@@ -38,23 +37,21 @@ def main(args=None):
     ##########################
     # Strategy
     ##########################
-    strategy = tf.distribute.MirroredStrategy()
-    # strategy = tf.distribute.experimental.CentralStorageStrategy()
+    # strategy = tf.distribute.MirroredStrategy()
+    strategy = tf.distribute.experimental.CentralStorageStrategy()
     num_workers = strategy.num_replicas_in_sync
-
-    BATCH_SIZE = args.batch_size
-    assert BATCH_SIZE % strategy.num_replicas_in_sync == 0
+    assert args.batch_size % strategy.num_replicas_in_sync == 0
 
     logger.info('{} : {}'.format(strategy.__class__.__name__, strategy.num_replicas_in_sync))
-    logger.info("GLOBAL BATCH SIZE : {}".format(BATCH_SIZE))
+    logger.info("GLOBAL BATCH SIZE : {}".format(args.batch_size))
     
     
     ##########################
     # Dataset
     ##########################
     trainset, valset = set_dataset(args.data_path, args.dataset)
-    steps_per_epoch = args.steps or len(trainset) // BATCH_SIZE
-    validation_steps = len(valset) // BATCH_SIZE
+    steps_per_epoch = args.steps or len(trainset) // args.batch_size
+    validation_steps = len(valset) // args.batch_size
 
     logger.info("TOTAL STEPS OF DATASET FOR TRAINING")
     logger.info("========== trainset ==========")
@@ -102,13 +99,15 @@ def main(args=None):
 
         # loss
         if args.loss == 'crossentropy':
-            criterion = tf.losses.sparse_categorical_crossentropy
+            criterion = tf.keras.losses.categorical_crossentropy
         else:
             raise ValueError()
 
         # generator
-        train_generator = DataLoader(args, 'train', trainset, BATCH_SIZE, num_workers).dataloader
-        val_generator = DataLoader(args, 'val', valset, BATCH_SIZE, num_workers, shuffle=False).dataloader
+        train_generator = DataLoader(args, 'train', trainset, args.batch_size, num_workers).dataloader
+        val_generator = DataLoader(args, 'val', valset, args.batch_size, num_workers, shuffle=False).dataloader
+        # for t in train_generator:
+        #     print(t['query'].shape, tf.reduce_min(t['query']), tf.reduce_max(t['query']), t['key'].shape)
         
         train_generator = strategy.experimental_distribute_dataset(train_generator)
         val_generator = strategy.experimental_distribute_dataset(val_generator)
@@ -121,63 +120,59 @@ def main(args=None):
     ##########################
     train_iterator = iter(train_generator)
     val_iterator = iter(val_generator)
-    # for t in train_iterator:
-    #     print(t[0].shape, t[1].shape)
     
     @tf.function
     def do_step(iterator, mode, queue):
+        def get_loss(img_q, key, labels, N, C, K):
+            query = encoder_q(img_q, training=True)
+            l_pos = tf.reshape(
+                tf.matmul(
+                    tf.reshape(query, [N, 1, C]), 
+                    tf.reshape(key, [N, C, 1])), 
+                [N, 1]) # (N, 1)
+            l_neg = tf.matmul(
+                tf.reshape(query, [N, C]), 
+                tf.reshape(queue, [C, K])) # (N, K)
+            logits = tf.concat((l_pos, l_neg), axis=1) # (N, K+1)
+            logits /= args.temperature
+            loss = criterion(labels, logits, from_logits=True)
+            loss_mean = tf.nn.compute_average_loss(loss, global_batch_size=args.batch_size)
+            return logits, loss, loss_mean
+
+
         def step_fn(from_iter):
             img_q, img_k = from_iter['query'], from_iter['key']
             N = tf.shape(img_q)[0]
             K = tf.shape(queue)[0]
             C = tf.shape(queue)[1]
+            labels = tf.one_hot(tf.zeros(N, dtype=tf.int32), args.num_negative+1)
 
-            k = encoder_k(img_k, training=False)
+            key = encoder_k(img_k, training=False)
+            ##########################
+            # TODO : Shuffling BN
+            ##########################
+            if args.shuffle_bn:
+                raise NotImplementedError()
+
             if mode == 'train':
                 with tf.GradientTape() as tape:
-                    q = encoder_q(img_q, training=True)
-                    l_pos = tf.reshape(
-                        tf.matmul(
-                            tf.reshape(q, [N, 1, C]), 
-                            tf.reshape(k, [N, C, 1])), 
-                        [N, 1])
-                    l_neg = tf.matmul(
-                        tf.reshape(q, [N, C]), 
-                        tf.reshape(queue, [C, K]))
-                    logits = tf.concat((l_pos, l_neg), axis=1)
-                    logits /= args.temperature
-                    labels = tf.zeros(N)
-                    loss = tf.reduce_mean(criterion(labels, logits))
-
-                grads = tape.gradient(loss, encoder_q.trainable_variables)
+                    logits, loss, loss_mean = get_loss(img_q, key, labels, N, C, K)
+                
+                grads = tape.gradient(loss_mean, encoder_q.trainable_variables)
                 optimizer.apply_gradients(list(zip(grads, encoder_q.trainable_variables)))
 
-                metrics['loss'].update_state(loss)
-                metrics['acc'].update_state(labels, logits)
-
             else:
-                q = encoder_q(img_q, training=True)
-                l_pos = tf.reshape(
-                    tf.matmul(
-                        tf.reshape(q, [N, 1, C]), 
-                        tf.reshape(k, [N, C, 1])), 
-                    [N, 1])
-                l_neg = tf.matmul(
-                    tf.reshape(q, [N, C]), 
-                    tf.reshape(queue, [C, K]))
-                logits = tf.concat((l_pos, l_neg), axis=1)
-                logits /= args.temperature
-                labels = tf.zeros(N)
-                loss = tf.reduce_mean(criterion(labels, logits))
+                logits, loss, loss_mean = get_loss(img_q, key, labels, N, C, K)
 
-                metrics['val_loss'].update_state(loss)
-                metrics['val_acc'].update_state(labels, logits)
+            metrics['acc' if mode == 'train' else 'val_acc'].update_state(labels, logits)
+            return key, loss
 
-            return k
-
-        new_key = strategy.run(step_fn, args=(next(iterator),))
+        new_key, loss_per_replica = strategy.run(step_fn, args=(next(iterator),))
+        loss_mean = strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_per_replica, axis=0)
+        metrics['loss' if mode == 'train' else 'val_loss'].update_state(loss_mean)
         if mode == 'train':
             queue = enqueue(queue, tf.concat(new_key.values, axis=0), K=args.num_negative)
+            encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
         return queue
 
 
@@ -194,7 +189,6 @@ def main(args=None):
         progBar_train = tf.keras.utils.Progbar(steps_per_epoch, stateful_metrics=metrics.keys())
         for step in range(steps_per_epoch):
             queue = do_step(train_iterator, 'train', queue)
-            encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
             progBar_train.update(step, values=[(k, v.result()) for k, v in metrics.items() if not 'val' in k])
             
             if args.tensorboard and args.tb_interval > 0:
@@ -268,7 +262,7 @@ if __name__ == "__main__":
     parser.add_argument("--dim",            type=int,       default=128)
     parser.add_argument("--num_negative",   type=int,       default=65536)
     parser.add_argument("--momentum",       type=float,     default=.999)
-    parser.add_argument("--mlp",            action='store_true')
+    parser.add_argument("--mlp",            action='store_true') # v2
     parser.add_argument("--shuffle_bn",     action='store_true')
     parser.add_argument("--steps",          type=int,       default=0)
     parser.add_argument("--epochs",         type=int,       default=100)
@@ -282,12 +276,13 @@ if __name__ == "__main__":
     parser.add_argument("--brightness",     type=float,     default=0.,             help='0.4')
     parser.add_argument("--contrast",       type=float,     default=0.,             help='0.4')
     parser.add_argument("--saturation",     type=float,     default=0.,             help='0.4')
-    parser.add_argument("--hue",            type=float,     default=0.,             help='v1: 0.4 / v2: 0.1')
+    parser.add_argument("--hue",            type=float,     default=0.,             help='v1: 0.4 / v2: 0.1') # v1 / v2
 
     parser.add_argument("--checkpoint",     action='store_true')
     parser.add_argument("--history",        action='store_true')
     parser.add_argument("--tensorboard",    action='store_true')
-    parser.add_argument("--lr_mode",        type=str,       default='constant',     choices=['constant', 'exponential', 'cosine'])
+    parser.add_argument("--tb_interval",    type=int,       default=0)
+    parser.add_argument("--lr_mode",        type=str,       default='constant',     choices=['constant', 'exponential', 'cosine']) # cosine is for v2
     parser.add_argument("--lr_value",       type=float,     default=.1)
     parser.add_argument("--lr_interval",    type=str,       default='20,50,80')
     parser.add_argument("--lr_warmup",      type=int,       default=0)

@@ -105,13 +105,17 @@ def search_same(args):
                     return args, -1
 
                 else:
-                    ckpt_list = sorted([d for d in os.listdir(os.path.join(args.result_path, '{}/{}/checkpoint'.format(args.dataset, args.stamp))) if 'h5' in d],
-                                        key=lambda x: int(x.split('_')[0]))
+                    ckpt_list = sorted(
+                        [d for d in os.listdir(
+                            os.path.join(
+                                args.result_path, 
+                                '{}/{}/checkpoint/query'.format(args.dataset, args.stamp))) if 'h5' in d],
+                        key=lambda x: int(x.split('_')[0]))
                     
                     if len(ckpt_list) > 0:
                         args.snapshot = os.path.join(
                             args.result_path, 
-                            '{}/{}/checkpoint/{}'.format(args.dataset, args.stamp, ckpt_list[-1]))
+                            '{}/{}/checkpoint/query/{}'.format(args.dataset, args.stamp, ckpt_list[-1]))
                         initial_epoch = int(ckpt_list[-1].split('_')[0])
                     else:
                         print('{} Training already finished!!!'.format(stamp))

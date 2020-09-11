@@ -1,4 +1,5 @@
 import random
+import numpy as np
 import tensorflow as tf
 import tensorflow_addons as tfa
 
@@ -19,6 +20,7 @@ class Augment:
 
         self.mean, self.std = mean_std[args.dataset]
 
+    @tf.function
     def _augmentv1(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
         x = self._crop(x, shape, coord)
         x = self._resize(x)
@@ -28,6 +30,7 @@ class Augment:
         x = self._standardize(x)
         return x
 
+    @tf.function
     def _augmentv2(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
         x = self._crop(x, shape, coord)
         x = self._resize(x)
@@ -56,14 +59,16 @@ class Augment:
         return x
 
     def _crop(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
-        begin, size, bboxes = tf.image.sample_distorted_bounding_box(
+        bbox_begin, bbox_size, _ = tf.image.sample_distorted_bounding_box(
             image_size=shape,
             bounding_boxes=coord,
             area_range=(.2, 1.),
             max_attempts=100,
             use_image_if_no_bounding_boxes=True)
-        x = tf.slice(x, begin, size)
-        x = tf.saturate_cast(x, tf.uint8)
+
+        offset_height, offset_width, _ = tf.unstack(bbox_begin)
+        target_height, target_width, _ = tf.unstack(bbox_size)
+        x = tf.slice(x, [offset_height, offset_width, 0], [target_height, target_width, 3])
         return x
 
     def _resize(self, x):
@@ -132,6 +137,6 @@ class Augment:
 
     def _random_gaussian_blur(self, x, sigma=[.1, 2.], p=.5):
         if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
-            sig = tf.random.uniform(shape=[], minval=sigma[0], maxval=sigma[1])
+            sig = np.random.uniform(sigma[0], sigma[1])
             x = tfa.image.gaussian_filter2d(x, sigma=sig)
         return x
