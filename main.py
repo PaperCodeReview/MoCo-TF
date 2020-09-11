@@ -83,9 +83,11 @@ def main(args=None):
         # metrics
         metrics = {
             'loss'      :   tf.keras.metrics.Mean('loss', dtype=tf.float32),
-            'acc'       :   tf.keras.metrics.CategoricalAccuracy('acc', dtype=tf.float32),
+            'acc1'      :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'acc1', dtype=tf.float32),
+            'acc5'      :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'acc5', dtype=tf.float32),
             'val_loss'  :   tf.keras.metrics.Mean('val_loss', dtype=tf.float32),
-            'val_acc'   :   tf.keras.metrics.CategoricalAccuracy('val_acc', dtype=tf.float32),
+            'val_acc1'  :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'val_acc1', dtype=tf.float32),
+            'val_acc5'  :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'val_acc5', dtype=tf.float32),
         }
 
         # optimizer
@@ -168,7 +170,8 @@ def main(args=None):
             else:
                 logits, loss, loss_mean = get_loss(img_q, key, labels, N, C, K)
 
-            metrics['acc' if mode == 'train' else 'val_acc'].update_state(labels, logits)
+            metrics['acc1' if mode == 'train' else 'val_acc1'].update_state(labels, logits)
+            metrics['acc5' if mode == 'train' else 'val_acc5'].update_state(labels, logits)
             return key, loss
 
         new_key, loss_per_replica = strategy.run(step_fn, args=(next(iterator),))
