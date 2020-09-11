@@ -172,7 +172,6 @@ def main(args=None):
         metrics['loss' if mode == 'train' else 'val_loss'].update_state(loss_mean)
         if mode == 'train':
             queue = enqueue(queue, tf.concat(new_key.values, axis=0), K=args.num_negative)
-            encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
         return queue
 
 
@@ -188,7 +187,7 @@ def main(args=None):
         encoder_q.trainable = True
         progBar_train = tf.keras.utils.Progbar(steps_per_epoch, stateful_metrics=metrics.keys())
         for step in range(steps_per_epoch):
-            queue = do_step(train_iterator, 'train', queue)
+            queue = do_step(train_iterator, 'train', queue)encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
             progBar_train.update(step, values=[(k, v.result()) for k, v in metrics.items() if not 'val' in k])
             
             if args.tensorboard and args.tb_interval > 0:
