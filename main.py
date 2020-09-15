@@ -2,6 +2,7 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import argparse
+import numpy as np
 from common import set_seed
 from common import get_logger
 from common import get_session
@@ -231,18 +232,26 @@ def main(args=None):
         logs['epoch'] = epoch + 1
 
         if args.checkpoint:
+            print()
             for n, m in zip(['query', 'key'], [encoder_q, encoder_k]):
                 m.save_weights(
                     os.path.join(
                         args.result_path, 
-                        '{}/{}/checkpoint/{}/{:04d}_{:.4f}.h5'.format(
-                            args.dataset, args.stamp, n, epoch+1, logs['val_loss'])))
+                        '{}/{}/checkpoint/{}/{:04d}_{:.4f}_{:.4f}_{:.4f}.h5'.format(
+                            args.dataset, args.stamp, n, epoch+1, logs['val_loss'], logs['val_acc1'], logs['val_acc5'])))
             
-                print('\nSaved at {}'.format(
+                print('Saved at {}'.format(
                         os.path.join(
                             args.result_path, 
-                            '{}/{}/checkpoint/{}/{:04d}_{:.4f}.h5'.format(
-                                args.dataset, args.stamp, n, epoch+1, logs['val_loss']))))
+                            '{}/{}/checkpoint/{}/{:04d}_{:.4f}_{:.4f}_{:.4f}.h5'.format(
+                                args.dataset, args.stamp, n, epoch+1, logs['val_loss'], logs['val_acc1'], logs['val_acc5']))))
+
+            np.save(
+                os.path.join(
+                    args.result_path, '{}/{}/checkpoint/{:04d}_{:.4f}_{:.4f}_{:.4f}.npy'.format(
+                        args.dataset, args.stamp, epoch+1, logs['val_loss'], logs['val_acc1'], logs['val_acc5'])),
+                queue.numpy())
+            print()
 
         if args.history:
             csvlogger = csvlogger.append(logs, ignore_index=True)

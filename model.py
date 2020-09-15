@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras.layers import Dense
 from tensorflow.keras.layers import Activation
@@ -56,10 +57,11 @@ def create_model(
         logger.info('Load weights at {}'.format(snapshot))
         encoder_k.load_weights(snapshot.replace('/query/', '/key/'))
         logger.info('Load weights at {}'.format(snapshot.replace('/query/', '/key/')))
-    
-    # queue
-    queue = tf.random.normal(shape=[K, dim])
-    queue /= tf.norm(queue, ord=2, axis=0)
+        queue = tf.constant(np.load(snapshot.replace('/query', '').replace('.h5', '.npy')), dtype=tf.float32)
+    else:
+        # queue
+        queue = tf.random.normal(shape=[K, dim])
+        queue /= tf.norm(queue, ord=2, axis=0)
     return encoder_q, encoder_k, queue
 
 
