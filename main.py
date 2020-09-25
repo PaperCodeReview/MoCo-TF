@@ -67,6 +67,15 @@ def main(args=None):
     ##########################
     # Model & Metric & Generator
     ##########################
+    # metrics
+    metrics = {
+        'loss'      :   tf.keras.metrics.Mean('loss', dtype=tf.float32),
+        'acc1'      :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'acc1', dtype=tf.float32),
+        'acc5'      :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'acc5', dtype=tf.float32),
+        'val_loss'  :   tf.keras.metrics.Mean('val_loss', dtype=tf.float32),
+        'val_acc1'  :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'val_acc1', dtype=tf.float32),
+        'val_acc5'  :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'val_acc5', dtype=tf.float32),
+    }
     with strategy.scope():
         encoder_q, encoder_k, queue = create_model(
             logger,
@@ -80,16 +89,6 @@ def main(args=None):
         if args.summary:
             encoder_q.summary()
             return
-
-        # metrics
-        metrics = {
-            'loss'      :   tf.keras.metrics.Mean('loss', dtype=tf.float32),
-            'acc1'      :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'acc1', dtype=tf.float32),
-            'acc5'      :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'acc5', dtype=tf.float32),
-            'val_loss'  :   tf.keras.metrics.Mean('val_loss', dtype=tf.float32),
-            'val_acc1'  :   tf.keras.metrics.TopKCategoricalAccuracy(1, 'val_acc1', dtype=tf.float32),
-            'val_acc5'  :   tf.keras.metrics.TopKCategoricalAccuracy(5, 'val_acc5', dtype=tf.float32),
-        }
 
         # optimizer
         lr_scheduler = OptionalLearningRateSchedule(args, steps_per_epoch, initial_epoch)
@@ -124,7 +123,7 @@ def main(args=None):
     train_iterator = iter(train_generator)
     val_iterator = iter(val_generator)
     
-    @tf.function
+    # @tf.function(experimental_relax_shapes=True)
     def do_step(iterator, mode, queue):
         def get_loss(img_q, key, labels, N, C, K):
             query = encoder_q(img_q, training=True)
@@ -137,6 +136,7 @@ def main(args=None):
                 tf.reshape(query, [N, C]), 
                 tf.reshape(queue, [C, K])) # (N, K)
             logits = tf.concat((l_pos, l_neg), axis=1) # (N, K+1)
+            logits = tf.math.l2_normalize(logits) # to prevent divergence when applying softmax
             logits /= args.temperature
             loss = criterion(labels, logits, from_logits=True)
             loss_mean = tf.nn.compute_average_loss(loss, global_batch_size=args.batch_size)
@@ -155,11 +155,18 @@ def main(args=None):
             labels = tf.one_hot(tf.zeros(N, dtype=tf.int32), args.num_negative+1)
 
             key = encoder_k(img_k, training=False)
-            ##########################
-            # TODO : Shuffling BN
-            ##########################
-            if args.shuffle_bn:
-                raise NotImplementedError()
+            if args.shuffle_bn and num_workers > 1:
+                def concat_fn(strategy, key_per_replica):
+                    return tf.concat(key_per_replica.values, axis=0)
+                replica_context = tf.distribute.get_replica_context()
+                key_all_replica = replica_context.merge_call(concat_fn, args=(key,))
+                unshuffle_idx_all_replica = replica_context.merge_call(concat_fn, args=(unshuffle_idx,))
+                new_key_list = []
+                for idx in unshuffle_idx_all_replica:
+                    new_key_list.append(tf.expand_dims(key_all_replica[idx], axis=0))
+                key_orig = tf.concat(tuple(new_key_list), axis=0)
+                key = key_orig[(args.batch_size//num_workers)*(replica_context.replica_id_in_sync_group):
+                               (args.batch_size//num_workers)*(replica_context.replica_id_in_sync_group+1)]
 
             if mode == 'train':
                 with tf.GradientTape() as tape:
@@ -177,10 +184,7 @@ def main(args=None):
 
         new_key, loss_per_replica = strategy.run(step_fn, args=(next(iterator),))
         loss_mean = strategy.reduce(tf.distribute.ReduceOp.MEAN, loss_per_replica, axis=0)
-        metrics['loss' if mode == 'train' else 'val_loss'].update_state(loss_mean)
-        if mode == 'train':
-            queue = enqueue(queue, tf.concat(new_key.values, axis=0), K=args.num_negative)
-        return queue
+        return loss_mean, tf.concat(new_key.values, axis=0)
 
 
     ##########################
@@ -195,7 +199,9 @@ def main(args=None):
         encoder_q.trainable = True
         progBar_train = tf.keras.utils.Progbar(steps_per_epoch, stateful_metrics=metrics.keys())
         for step in range(steps_per_epoch):
-            queue = do_step(train_iterator, 'train', queue)
+            loss_mean, key = do_step(train_iterator, 'train', queue)
+            metrics['loss'].update_state(loss_mean)
+            queue = enqueue(queue, key, K=args.num_negative)
             encoder_k = momentum_update_model(encoder_q, encoder_k, m=args.momentum)
             progBar_train.update(step, values=[(k, v.result()) for k, v in metrics.items() if not 'val' in k])
             
@@ -216,9 +222,10 @@ def main(args=None):
         print('\n\nValidation')
         encoder_q.trainable = False
         progBar_val = tf.keras.utils.Progbar(validation_steps, stateful_metrics=metrics.keys())
-        for step in range(validation_steps):
-            do_step(val_iterator, 'val', queue)
-            progBar_val.update(step, values=[(k, v.result()) for k, v in metrics.items() if 'val' in k])
+        for val_step in range(validation_steps):
+            loss_mean, _ = do_step(val_iterator, 'val', queue)
+            metrics['val_loss'].update_state(loss_mean)
+            progBar_val.update(val_step, values=[(k, v.result()) for k, v in metrics.items() if 'val' in k])
 
         if args.tensorboard:
             with val_writer.as_default():

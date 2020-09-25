@@ -93,8 +93,27 @@ class Augment:
         return x
 
     def _brightness(self, x):
-        ''' Brightness in torchvision is implemented about multiplying factor to image, 
-            but tensorflow.image is just implemented about adding factor to image.
+        ''' Brightness in torchvision is implemented about multiplying the factor to image, 
+            but tensorflow.image is just implemented about adding the factor to image.
+
+        In tensorflow.image.adjust_brightness,
+            For regular images, `delta` should be in the range `[0,1)`, 
+            as it is added to the image in floating point representation, 
+            where pixel values are in the `[0,1)` range.
+
+        adjusted = math_ops.add(
+            flt_image, math_ops.cast(delta, flt_image.dtype), name=name)
+
+        However in torchvision docs,
+        Args:
+            brightness (float or tuple of float (min, max)): How much to jitter brightness.
+            brightness_factor is chosen uniformly from [max(0, 1 - brightness), 1 + brightness]
+            or the given [min, max]. Should be non negative numbers.
+
+        In torchvision.transforms.functional_tensor,
+            return _blend(img, torch.zeros_like(img), brightness_factor)
+            where _blend 
+                return brightness * img1
         '''
         # x = tf.image.random_brightness(x, max_delta=self.args.brightness)
         x = tf.cast(x, tf.float32)

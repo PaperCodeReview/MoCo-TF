@@ -35,7 +35,6 @@ class DataLoader:
         self.num_workers = num_workers
         self.shuffle = shuffle
 
-        self.group = self.batch_size // self.num_workers
         self.dataloader = self._dataloader()
 
     def __len__(self):

@@ -54,10 +54,11 @@ def create_model(
 
     if snapshot:
         encoder_q.load_weights(snapshot)
-        logger.info('Load weights at {}'.format(snapshot))
+        logger.info('Load query weights at {}'.format(snapshot))
         encoder_k.load_weights(snapshot.replace('/query/', '/key/'))
-        logger.info('Load weights at {}'.format(snapshot.replace('/query/', '/key/')))
+        logger.info('Load key weights at {}'.format(snapshot.replace('/query/', '/key/')))
         queue = tf.constant(np.load(snapshot.replace('/query', '').replace('.h5', '.npy')), dtype=tf.float32)
+        logger.info('Load queue at {}'.format(snapshot.replace('/query', '').replace('.h5', '.npy')))
     else:
         # queue
         queue = tf.random.normal(shape=[K, dim])
