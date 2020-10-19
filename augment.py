@@ -25,12 +25,12 @@ class Augment:
         return x
 
     @tf.function
-    def _augmentv2(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
+    def _augmentv2(self, x, shape, radius, coord=[[[0., 0., 1., 1.]]]):
         x = self._crop(x, shape, coord)
         x = self._resize(x)
         x = self._random_color_jitter(x, p=.8)
         x = self._random_grayscale(x, p=.2)
-        x = self._random_gaussian_blur(x, sigma=[.1, 2.], p=.5)
+        x = self._random_gaussian_blur(x, radius, p=.5)
         x = self._random_hflip(x)
         x = self._standardize(x)
         return x
@@ -72,7 +72,7 @@ class Augment:
         return x
 
     def _random_color_jitter(self, x, p=.8):
-        if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
+        if tf.less(tf.random.uniform(shape=[], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
             x = self._color_jitter(x)
         return x
 
@@ -130,7 +130,7 @@ class Augment:
         return tf.image.rgb_to_grayscale(x) # after expand_dims
 
     def _random_grayscale(self, x, p=.2):
-        if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
+        if tf.less(tf.random.uniform(shape=[], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
             x = self._grayscale(x)
             x = tf.tile(x, [1, 1, 3])
         return x
@@ -138,8 +138,7 @@ class Augment:
     def _random_hflip(self, x):
         return tf.image.random_flip_left_right(x)
 
-    def _random_gaussian_blur(self, x, sigma=[.1, 2.], p=.5):
-        if tf.less(tf.random.uniform([], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
-            sig = np.random.uniform(sigma[0], sigma[1])
-            x = tfa.image.gaussian_filter2d(x, sigma=sig)
+    def _random_gaussian_blur(self, x, radius, p=.5):
+        if tf.less(tf.random.uniform(shape=[], minval=0, maxval=1, dtype=tf.float32), tf.cast(p, tf.float32)):
+            x = tfa.image.gaussian_filter2d(x, filter_shape=radius)
         return x

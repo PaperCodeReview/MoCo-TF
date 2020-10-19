@@ -46,7 +46,8 @@ class DataLoader:
             if self.args.task == 'v1':
                 aug_img = augset._augmentv1(aug_img, shape) # moco v1
             else:
-                aug_img = augset._augmentv2(aug_img, shape) # moco v2
+                radius = np.random.choice([3, 5])
+                aug_img = augset._augmentv2(aug_img, shape, (radius, radius)) # moco v2
             img_list.append(aug_img)
         return img_list
 
