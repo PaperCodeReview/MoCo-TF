@@ -65,12 +65,12 @@ def search_same(args):
         search_ignore += args.ignore_search.split(',')
 
     initial_epoch = 0
-    stamps = os.listdir(os.path.join(args.result_path, args.dataset))
+    stamps = os.listdir(args.result_path)
     for stamp in stamps:
         try:
             desc = yaml.full_load(
                 open(os.path.join(
-                    args.result_path, '{}/{}/model_desc.yml'.format(args.dataset, stamp))))
+                    args.result_path, f'{args.task}/{stamp}/model_desc.yml')))
         except:
             continue
 
@@ -91,13 +91,13 @@ def search_same(args):
                 df = pd.read_csv(
                     os.path.join(
                         args.result_path, 
-                        '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)))
+                        f'{args.task}/{args.stamp}/history/epoch.csv'))
             except:
                 continue
 
             if len(df) > 0:
                 if int(df['epoch'].values[-1]+1) == args.epochs:
-                    print('{} Training already finished!!!'.format(stamp))
+                    print(f'{stamp} Training already finished!!!')
                     return args, -1
 
                 elif np.isnan(df['val_loss'].values[-1]) or np.isinf(df['val_loss'].values[-1]):
@@ -109,13 +109,13 @@ def search_same(args):
                         [d for d in os.listdir(
                             os.path.join(
                                 args.result_path, 
-                                '{}/{}/checkpoint/query'.format(args.dataset, args.stamp))) if 'h5' in d],
+                                f'{args.task}/{args.stamp}/checkpoint/query')) if 'h5' in d],
                         key=lambda x: int(x.split('_')[0]))
                     
                     if len(ckpt_list) > 0:
                         args.snapshot = os.path.join(
                             args.result_path, 
-                            '{}/{}/checkpoint/query/{}'.format(args.dataset, args.stamp, ckpt_list[-1]))
+                            f'{args.task}/{args.stamp}/checkpoint/query/{ckpt_list[-1]}')
                         initial_epoch = int(ckpt_list[-1].split('_')[0])
                     else:
                         print('{} Training already finished!!!'.format(stamp))

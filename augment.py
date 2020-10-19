@@ -4,21 +4,15 @@ import tensorflow as tf
 import tensorflow_addons as tfa
 
 
-mean_std = {
-    'cub': [[0.48552202, 0.49934904, 0.43224954], 
-            [0.18172876, 0.18109447, 0.19272076]],
-    'cifar100': [[0.50707516, 0.48654887, 0.44091784], 
-                 [0.20079844, 0.19834627, 0.20219835]],
-    'imagenet': [[0.485, 0.456, 0.406],
-                 [0.229, 0.224, 0.225]]
-}
+mean_std = [[0.485, 0.456, 0.406],
+            [0.229, 0.224, 0.225]]
 
 class Augment:
     def __init__(self, args, mode='train'):
         self.args = args
         self.mode = mode
 
-        self.mean, self.std = mean_std[args.dataset]
+        self.mean, self.std = mean_std
 
     @tf.function
     def _augmentv1(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
@@ -44,18 +38,8 @@ class Augment:
     def _standardize(self, x):
         x = tf.cast(x, tf.float32)
         x /= 255.
-        if self.args.standardize == "minmax1":
-            pass
-        elif self.args.standardize == "minmax2":
-            x -= 0.5
-            x /= 0.5
-        elif self.args.standardize == "norm":
-            x -= self.mean
-            x /= self.std
-        elif self.args.standardize == "eachnorm":
-            x = (x-tf.math.reduce_mean(x))/tf.math.reduce_std(x)
-        else:
-            raise ValueError()
+        x -= self.mean
+        x /= self.std
         return x
 
     def _crop(self, x, shape, coord=[[[0., 0., 1., 1.]]]):

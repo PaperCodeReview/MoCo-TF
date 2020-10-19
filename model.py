@@ -27,7 +27,7 @@ def create_model(
     img_size=224,
     dim=128, 
     K=65536,
-    mlp=False,
+    mlp=0,
     snapshot=None):
 
     def _get_architecture(name=None):
@@ -36,11 +36,11 @@ def create_model(
             pooling='avg',
             weights=None,
             input_shape=(img_size, img_size, 3))
-
-        x = Dense(dim)(base_encoder.output)
+        x = base_encoder.output
         if mlp:
+            x = Dense(mlp)(x)
             x = Activation('relu')(x)
-            x = Dense(dim)(x)
+        x = Dense(dim)(x)
         arch = Model(base_encoder.input, x, name=name)
         return arch
     
@@ -60,9 +60,8 @@ def create_model(
         queue = tf.constant(np.load(snapshot.replace('/query', '').replace('.h5', '.npy')), dtype=tf.float32)
         logger.info('Load queue at {}'.format(snapshot.replace('/query', '').replace('.h5', '.npy')))
     else:
-        # queue
-        queue = tf.random.normal(shape=[K, dim])
-        queue /= tf.norm(queue, ord=2, axis=0)
+        queue = tf.random.normal(shape=[dim, K])
+        queue = tf.math.l2_normalize(queue, axis=0)
     return encoder_q, encoder_k, queue
 
 
@@ -76,6 +75,14 @@ def momentum_update_model(encoder_q, encoder_k, m=0.999):
 
 
 def enqueue(queue, new_keys, K=65536):
-    queue = tf.concat([new_keys, queue], axis=0)
-    queue = queue[:K]
+    '''
+    Arguments
+        queue (128, 65536)
+        new_keys (256, 128) -> tf.transpose(new_keys) (128, 256)
+    
+    Returns
+        queue (128, 65536)
+    '''
+    queue = tf.concat([tf.transpose(new_keys), queue], axis=1)
+    queue = queue[:,:K]
     return queue

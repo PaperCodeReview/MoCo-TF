@@ -21,7 +21,7 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
 
         elif self.args.lr_mode == 'cosine':
             self.lr_scheduler = \
-                tf.keras.experimental.CosineDecay(self.args.lr, self.args.epochs-self.args.lr_warmup)
+                tf.keras.experimental.CosineDecay(self.args.lr, self.args.epochs)
 
         elif self.args.lr_mode == 'constant':
             self.lr_scheduler = lambda x: self.args.lr
@@ -32,7 +32,6 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
             'steps_per_epoch': self.steps_per_epoch,
             'init_lr': self.args.lr,
             'lr_mode': self.args.lr_mode,
-            'lr_warmup': self.args.lr_warmup,
             'lr_value': self.args.lr_value,
             'lr_interval': self.args.lr_interval,
         }
@@ -41,16 +40,10 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
         step = tf.cast(step, tf.float32)
         step += self.initial_epoch * self.steps_per_epoch
         lr_epoch = (step / self.steps_per_epoch)
-        if self.args.lr_warmup:
-            total_lr_warmup_step = self.args.lr_warmup * self.steps_per_epoch
-            return tf.cond(lr_epoch < self.args.lr_warmup,
-                           lambda: step / total_lr_warmup_step * self.args.lr,
-                           lambda: self.lr_scheduler(lr_epoch-self.args.lr_warmup))
+        if self.args.lr_mode == 'constant':
+            return self.args.lr
         else:
-            if self.args.lr_mode == 'constant':
-                return self.args.lr
-            else:
-                return self.lr_scheduler(lr_epoch)
+            return self.lr_scheduler(lr_epoch)
 
 
 def create_callbacks(args, metrics):
@@ -59,34 +52,33 @@ def create_callbacks(args, metrics):
             flag = True
             while flag:
                 try:
-                    os.makedirs(os.path.join(args.result_path, args.dataset, args.stamp))
+                    os.makedirs(os.path.join(args.result_path, args.task, args.stamp))
                     flag = False
                 except:
                     args.stamp = create_stamp()
 
             yaml.dump(
                 vars(args), 
-                open(os.path.join(args.result_path, args.dataset, args.stamp, "model_desc.yml"), "w"), 
+                open(os.path.join(args.result_path, args.task, args.stamp, "model_desc.yml"), "w"), 
                 default_flow_style=False)
 
     if args.checkpoint:
-        os.makedirs(os.path.join(args.result_path, '{}/{}/checkpoint/query'.format(args.dataset, args.stamp)), exist_ok=True)
-        os.makedirs(os.path.join(args.result_path, '{}/{}/checkpoint/key'.format(args.dataset, args.stamp)), exist_ok=True)
+        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/checkpoint/query'), exist_ok=True)
+        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/checkpoint/key'), exist_ok=True)
 
     if args.history:
-        os.makedirs(os.path.join(args.result_path, '{}/{}/history'.format(args.dataset, args.stamp)), exist_ok=True)
+        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history'), exist_ok=True)
         csvlogger = pd.DataFrame(columns=['epoch']+list(metrics.keys()))
-        if os.path.isfile(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp))):
-            csvlogger = pd.read_csv(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)))
+        if os.path.isfile(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv')):
+            csvlogger = pd.read_csv(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv'))
         else:
-            csvlogger.to_csv(os.path.join(args.result_path, '{}/{}/history/epoch.csv'.format(args.dataset, args.stamp)), index=False)
+            csvlogger.to_csv(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv'), index=False)
     else:
         csvlogger = None
 
     if args.tensorboard:
-        train_writer = tf.summary.create_file_writer(os.path.join(args.result_path, args.dataset, args.stamp, 'logs/train'))
-        val_writer = tf.summary.create_file_writer(os.path.join(args.result_path, args.dataset, args.stamp, 'logs/val'))
+        train_writer = tf.summary.create_file_writer(os.path.join(args.result_path, args.task, args.stamp, 'logs'))
     else:
-        train_writer = val_writer = None
+        train_writer = None
 
-    return csvlogger, train_writer, val_writer
+    return csvlogger, train_writer

@@ -6,9 +6,36 @@ This is an unofficial implementation of Moco v1 [(Momentum Contrast for Unsuperv
 (TODO : requirements.txt and Dockerfile for the image of fixed environment.)
 - python >= 3.6
 - tensorflow >= 2.2
+
 ## Training
 ```
-python main.py --task v1 --dataset imagenet --brightness 0.4 --contrast 0.4 --saturation 0.4 --hue 0.1 --data_path /path/of/your/data --gpus 0
+python main.py \
+    --task v1 \
+    --dataset imagenet \
+    --brightness 0.4 \
+    --contrast 0.4 \
+    --saturation 0.4 \
+    --hue 0.1 \
+    --data_path /path/of/your/data \
+    --gpus 0
 ```
-## Reproducibility
-- TODO
+
+## Evaluation
+**TODO**
+```
+```
+
+## Results
+Our model achieves the following performance on :
+### Image Classification on ImageNet (IN-1M)
+#### MoCo v1
+|         Model         | batch | Accuracy (paper) | Accuracy (ours) |
+| --------------------- | ----- | ---------------- | --------------- |
+| ResNet50 (200 epochs) |  256  |       60.6       |       -         |
+  
+#### MoCo v2
+|         Model         | batch | Accuracy (paper) | Accuracy (ours) |
+| --------------------- | ----- | ---------------- | --------------- |
+| ResNet50 (200 epochs) |  256  |       67.5       |        -        |
+| ResNet50 (800 epochs) |  256  |       71.1       |        -        |
+

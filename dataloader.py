@@ -10,19 +10,13 @@ from augment import Augment
 AUTO = tf.data.experimental.AUTOTUNE
 
 
-def set_dataset(data_path, dataset):
+def set_dataset(data_path):
     trainset = pd.read_csv(
         os.path.join(
-            data_path, '{}_trainset.csv'.format(dataset)
+            data_path, 'imagenet_trainset.csv'
         )).values.tolist()
     trainset = [[os.path.join(data_path, t[0]), t[1]] for t in trainset]
-
-    valset = pd.read_csv(
-        os.path.join(
-            data_path, '{}_valset.csv'.format(dataset)
-        )).values.tolist()
-    valset = [[os.path.join(data_path, t[0]), t[1]] for t in valset]
-    return np.array(trainset, dtype='object'), np.array(valset, dtype='object')
+    return np.array(trainset, dtype='object')
 
 
 class DataLoader:
