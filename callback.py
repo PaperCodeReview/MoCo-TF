@@ -1,7 +1,14 @@
 import os
+import six
 import yaml
+import numpy as np
 import pandas as pd
 import tensorflow as tf
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import CSVLogger
+from tensorflow.keras.callbacks import TensorBoard
+from tensorflow.python.keras.utils import tf_utils
+from tensorflow.python.platform import tf_logging as logging
 
 from common import create_stamp
 
@@ -33,8 +40,7 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
             'init_lr': self.args.lr,
             'lr_mode': self.args.lr_mode,
             'lr_value': self.args.lr_value,
-            'lr_interval': self.args.lr_interval,
-        }
+            'lr_interval': self.args.lr_interval,}
 
     def __call__(self, step):
         step = tf.cast(step, tf.float32)
@@ -46,39 +52,116 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
             return self.lr_scheduler(lr_epoch)
 
 
-def create_callbacks(args, metrics):
+class MocoModelCheckpoint(ModelCheckpoint):
+    def save_queue(self, filepath, epoch):
+        filepath_add = filepath.replace('checkpoint', 'checkpoint/queue')
+        filepath_add = filepath_add.replace('.h5', '.npy')
+        np.save(filepath_add, self.model.queue.numpy())
+        print('\nEpoch %05d: saving queue to %s' % (epoch + 1, filepath_add))
+        
+    def on_epoch_end(self, epoch, logs=None):
+        self.epochs_since_last_save += 1
+        if self.save_freq == 'epoch':
+            logs = logs or {}
+            if isinstance(self.save_freq, 
+                          int) or self.epochs_since_last_save >= self.period:
+                logs = tf_utils.to_numpy_or_python_type(logs)
+                self.epochs_since_last_save = 0
+                filepath = self._get_file_path(epoch, logs)
+                
+                self.save_queue(filepath, epoch)
+                for m in self.model.layers:
+                    try:
+                        if '_q_' in m.name:
+                            model_name = 'query'
+                        elif '_k_' in m.name:
+                            model_name = 'key'
+                        else:
+                            raise ValueError()
+
+                        filepath_add = filepath.replace('checkpoint', f'checkpoint/{model_name}')
+                        if self.save_best_only:
+                            current = logs.get(self.monitor)
+                            if current is None:
+                                logging.warning('Can save best %s only with %s available, '
+                                                'skipping.' % (model_name, self.monitor))
+                            else:
+                                if self.monitor_op(current, self.best):
+                                    if self.verbose > 0:
+                                        print('\nEpoch %05d: %s improved from %0.5f to %0.5f,'
+                                              ' saving %s to %s' % (epoch + 1, self.monitor, self.best, 
+                                                                    current, model_name, filepath_add))
+                                    self.best = current
+                                    if self.save_weights_only:
+                                        m.save_weights(
+                                            filepath_add, overwrite=True, options=self._options)
+                                    else:
+                                        m.save(filepath_add, overwrite=True, options=self._options)
+                                else:
+                                    if self.verbose > 0:
+                                        print('\nEpoch %05d: %s did not improve from %0.5f' %
+                                            (epoch + 1, self.monitor, self.best))
+                        else:
+                            if self.verbose > 0:
+                                print('\nEpoch %05d: saving %s to %s' % (epoch + 1, model_name, filepath_add))
+                            if self.save_weights_only:
+                                m.save_weights(
+                                    filepath_add, overwrite=True, options=self._options)
+                            else:
+                                m.save(filepath_add, overwrite=True, options=self._options)
+
+                        self._maybe_remove_file()
+                    except IOError as e:
+                        # `e.errno` appears to be `None` so checking the content of `e.args[0]`.
+                        if 'is a directory' in six.ensure_str(e.args[0]).lower():
+                            raise IOError('Please specify a non-directory filepath for '
+                                        'ModelCheckpoint. Filepath used is an existing '
+                                        'directory: {}'.format(filepath))
+
+
+def create_callbacks(args, metrics=None):
     if args.snapshot is None:
         if args.checkpoint or args.history or args.tensorboard:
             flag = True
             while flag:
                 try:
-                    os.makedirs(os.path.join(args.result_path, args.task, args.stamp))
+                    os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}')
                     flag = False
                 except:
                     args.stamp = create_stamp()
 
             yaml.dump(
                 vars(args), 
-                open(os.path.join(args.result_path, args.task, args.stamp, "model_desc.yml"), "w"), 
+                open(f'{args.result_path}/{args.task}/{args.stamp}/model_desc.yml', 'w'), 
                 default_flow_style=False)
 
+    callbacks = []
     if args.checkpoint:
-        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/checkpoint/query'), exist_ok=True)
-        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/checkpoint/key'), exist_ok=True)
+        for m in ['query', 'key', 'queue']:
+            os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/{m}', exist_ok=True)
+            
+        callbacks.append(MocoModelCheckpoint(
+            filepath=os.path.join(
+                f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
+                '{epoch:04d}_{loss:.4f}_{acc1:.4f}_{acc5:.4f}.h5'),
+            monitor='acc1',
+            mode='max',
+            verbose=1,
+            save_weights_only=True))
 
     if args.history:
-        os.makedirs(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history'), exist_ok=True)
-        csvlogger = pd.DataFrame(columns=['epoch']+list(metrics.keys()))
-        if os.path.isfile(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv')):
-            csvlogger = pd.read_csv(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv'))
-        else:
-            csvlogger.to_csv(os.path.join(args.result_path, f'{args.task}/{args.stamp}/history/epoch.csv'), index=False)
-    else:
-        csvlogger = None
+        os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/history', exist_ok=True)
+        callbacks.append(CSVLogger(
+            filename=f'{args.result_path}/{args.task}/{args.stamp}/history/epoch.csv',
+            separator=',', append=True))
 
     if args.tensorboard:
-        train_writer = tf.summary.create_file_writer(os.path.join(args.result_path, args.task, args.stamp, 'logs'))
-    else:
-        train_writer = None
+        callbacks.append(TensorBoard(
+            log_dir=f'{args.result_path}/{args.task}/{args.stamp}/logs',
+            histogram_freq=args.tb_histogram,
+            write_graph=True, 
+            write_images=True,
+            update_freq=args.tb_interval,
+            profile_batch=100,))
 
-    return csvlogger, train_writer
+    return callbacks

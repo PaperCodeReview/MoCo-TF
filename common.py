@@ -58,19 +58,19 @@ def create_stamp():
 
 
 def search_same(args):
-    search_ignore = ['checkpoint', 'history', 'snapshot', 'summary',
+    search_ignore = ['checkpoint', 'history', 'tensorboard', 
+                     'tb_interval', 'snapshot', 'summary',
                      'src_path', 'data_path', 'result_path', 
                      'epochs', 'stamp', 'gpus', 'ignore_search']
     if len(args.ignore_search) > 0:
         search_ignore += args.ignore_search.split(',')
 
     initial_epoch = 0
-    stamps = os.listdir(args.result_path)
+    stamps = os.listdir(f'{args.result_path}/{args.task}')
     for stamp in stamps:
         try:
             desc = yaml.full_load(
-                open(os.path.join(
-                    args.result_path, f'{args.task}/{stamp}/model_desc.yml')))
+                open(f'{args.result_path}/{args.task}/{stamp}/model_desc.yml'))
         except:
             continue
 
@@ -78,9 +78,12 @@ def search_same(args):
         for k, v in vars(args).items():
             if k in search_ignore:
                 continue
+
+            if k == 'tb_histogram' and k not in desc:
+                desc[k] = 0
                 
             if v != desc[k]:
-                # if stamp == '200903_Thu_05_38_31':
+                # if stamp == '201019_Mon_10_52_59':
                 #     print(stamp, k, desc[k], v)
                 flag = False
                 break
@@ -100,27 +103,21 @@ def search_same(args):
                     print(f'{stamp} Training already finished!!!')
                     return args, -1
 
-                elif np.isnan(df['val_loss'].values[-1]) or np.isinf(df['val_loss'].values[-1]):
+                elif np.isnan(df['loss'].values[-1]) or np.isinf(df['loss'].values[-1]):
                     print('{} | Epoch {:04d}: Invalid loss, terminating training'.format(stamp, int(df['epoch'].values[-1]+1)))
                     return args, -1
 
                 else:
                     ckpt_list = sorted(
                         [d for d in os.listdir(
-                            os.path.join(
-                                args.result_path, 
-                                f'{args.task}/{args.stamp}/checkpoint/query')) if 'h5' in d],
+                            f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/query') if 'h5' in d],
                         key=lambda x: int(x.split('_')[0]))
                     
                     if len(ckpt_list) > 0:
-                        args.snapshot = os.path.join(
-                            args.result_path, 
-                            f'{args.task}/{args.stamp}/checkpoint/query/{ckpt_list[-1]}')
+                        args.snapshot = f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/query/{ckpt_list[-1]}'
                         initial_epoch = int(ckpt_list[-1].split('_')[0])
                     else:
                         print('{} Training already finished!!!'.format(stamp))
                         return args, -1
-
             break
-    
     return args, initial_epoch
