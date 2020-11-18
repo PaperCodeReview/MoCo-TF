@@ -122,7 +122,7 @@ def create_model(
     img_size=224,
     dim=128, 
     K=65536,
-    mlp=0,
+    mlp=False,
     snapshot=None):
 
     def _get_architecture(name=None):
@@ -132,10 +132,10 @@ def create_model(
             weights=None,
             input_shape=(img_size, img_size, 3))
         x = base_encoder.output
-        if mlp:
-            x = Dense(mlp)(x)
-            x = Activation('relu')(x)
         x = Dense(dim)(x)
+        if mlp:
+            x = Activation('relu')(x)
+            x = Dense(dim)(x)
         arch = Model(base_encoder.input, x, name=name)
         return arch
     

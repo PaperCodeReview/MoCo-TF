@@ -61,7 +61,7 @@ def search_same(args):
     search_ignore = ['checkpoint', 'history', 'tensorboard', 
                      'tb_interval', 'snapshot', 'summary',
                      'src_path', 'data_path', 'result_path', 
-                     'epochs', 'stamp', 'gpus', 'ignore_search']
+                     'stamp', 'gpus', 'ignore_search']
     if len(args.ignore_search) > 0:
         search_ignore += args.ignore_search.split(',')
 
@@ -83,7 +83,7 @@ def search_same(args):
                 desc[k] = 0
                 
             if v != desc[k]:
-                # if stamp == '201019_Mon_10_52_59':
+                # if stamp == '201019_Mon_10_53_03':
                 #     print(stamp, k, desc[k], v)
                 flag = False
                 break

@@ -38,7 +38,11 @@ def main(args=None):
     ##########################
     # Strategy
     ##########################
-    strategy = tf.distribute.experimental.CentralStorageStrategy()
+    if len(args.gpus.split(',')) > 1:
+        strategy = tf.distribute.experimental.CentralStorageStrategy()
+    else:
+        strategy = tf.distribute.OneDeviceStrategy(device="/gpu:0")
+
     num_workers = strategy.num_replicas_in_sync
     assert args.batch_size % num_workers == 0
 
@@ -119,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument("--dim",            type=int,       default=128)
     parser.add_argument("--num_negative",   type=int,       default=65536)
     parser.add_argument("--momentum",       type=float,     default=.999)
-    parser.add_argument("--mlp",            type=int,       default=0) # v2
+    parser.add_argument("--mlp",            action='store_true') # v2
     parser.add_argument("--shuffle_bn",     action='store_true')
     parser.add_argument("--steps",          type=int,       default=0)
     parser.add_argument("--epochs",         type=int,       default=200)
