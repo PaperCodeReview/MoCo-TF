@@ -11,10 +11,8 @@ class Augment:
     def __init__(self, args, mode='train'):
         self.args = args
         self.mode = mode
-
         self.mean, self.std = mean_std
 
-    @tf.function
     def _augmentv1(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
         x = self._crop(x, shape, coord)
         x = self._resize(x)
@@ -24,7 +22,6 @@ class Augment:
         x = self._standardize(x)
         return x
 
-    @tf.function
     def _augmentv2(self, x, shape, radius, coord=[[[0., 0., 1., 1.]]]):
         x = self._crop(x, shape, coord)
         x = self._resize(x)
@@ -32,6 +29,12 @@ class Augment:
         x = self._random_grayscale(x, p=.2)
         x = self._random_gaussian_blur(x, radius, p=.5)
         x = self._random_hflip(x)
+        x = self._standardize(x)
+        return x
+
+    def _augment_lincls(self, x, shape, coord=[[[0., 0., 1., 1.]]]):
+        x = self._crop(x, shape, coord)
+        x = self._resize(x)
         x = self._standardize(x)
         return x
 

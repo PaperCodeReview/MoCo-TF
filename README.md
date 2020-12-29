@@ -54,3 +54,19 @@ Our model achieves the following performance on :
 | ResNet50 (200 epochs) |  256  |       67.5       |        -        |
 | ResNet50 (800 epochs) |  256  |       71.1       |        -        |
 
+## Citation
+```
+@Article{he2019moco,
+  author  = {Kaiming He and Haoqi Fan and Yuxin Wu and Saining Xie and Ross Girshick},
+  title   = {Momentum Contrast for Unsupervised Visual Representation Learning},
+  journal = {arXiv preprint arXiv:1911.05722},
+  year    = {2019},
+}
+
+@Article{chen2020mocov2,
+  author  = {Xinlei Chen and Haoqi Fan and Ross Girshick and Kaiming He},
+  title   = {Improved Baselines with Momentum Contrastive Learning},
+  journal = {arXiv preprint arXiv:2003.04297},
+  year    = {2020},
+}
+```

@@ -4,6 +4,7 @@ import yaml
 import numpy as np
 import pandas as pd
 import tensorflow as tf
+from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow.keras.callbacks import CSVLogger
 from tensorflow.keras.callbacks import TensorBoard
@@ -93,10 +94,9 @@ class MocoModelCheckpoint(ModelCheckpoint):
                                                                     current, model_name, filepath_add))
                                     self.best = current
                                     if self.save_weights_only:
-                                        m.save_weights(
-                                            filepath_add, overwrite=True, options=self._options)
+                                        m.save_weights(filepath_add, overwrite=True)
                                     else:
-                                        m.save(filepath_add, overwrite=True, options=self._options)
+                                        m.save(filepath_add, overwrite=True)
                                 else:
                                     if self.verbose > 0:
                                         print('\nEpoch %05d: %s did not improve from %0.5f' %
@@ -105,10 +105,9 @@ class MocoModelCheckpoint(ModelCheckpoint):
                             if self.verbose > 0:
                                 print('\nEpoch %05d: saving %s to %s' % (epoch + 1, model_name, filepath_add))
                             if self.save_weights_only:
-                                m.save_weights(
-                                    filepath_add, overwrite=True, options=self._options)
+                                m.save_weights(filepath_add, overwrite=True)
                             else:
-                                m.save(filepath_add, overwrite=True, options=self._options)
+                                m.save(filepath_add, overwrite=True)
 
                         self._maybe_remove_file()
                     except IOError as e:
@@ -119,35 +118,76 @@ class MocoModelCheckpoint(ModelCheckpoint):
                                         'directory: {}'.format(filepath))
 
 
-def create_callbacks(args, metrics=None):
-    if args.snapshot is None:
-        if args.checkpoint or args.history or args.tensorboard:
-            flag = True
-            while flag:
-                try:
-                    os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}')
-                    flag = False
-                except:
-                    args.stamp = create_stamp()
+class MomentumUpdate(Callback):
+    def __init__(self, momentum, num_negative):
+        super(MomentumUpdate, self).__init__()
+        self.momentum = momentum
+        self.num_negative = num_negative
 
+    def on_batch_end(self, batch, logs=None):
+        for layer_q, layer_k in zip(self.model.encoder_q.layers, self.model.encoder_k.layers):
+            q_weights = layer_q.get_weights()
+            k_weights = layer_k.get_weights()
+            layer_k.set_weights([k * self.momentum + q * (1.-self.momentum) for q, k in zip(q_weights, k_weights)])
+
+        key = logs.pop('key')
+        self.model.queue = tf.concat([tf.transpose(key), self.model.queue], axis=-1)
+        self.model.queue = self.model.queue[:,:self.num_negative]
+
+    def on_epoch_end(self, epoch, logs=None):
+        logs.pop('key')
+
+
+def create_callbacks(args, logger, initial_epoch):
+    if not args.resume:
+        if args.checkpoint or args.history or args.tensorboard:
+            if os.path.isdir(f'{args.result_path}/{args.task}/{args.stamp}'):
+                flag = input(f'\n{args.task}/{args.stamp} is already saved. '
+                              'Do you want new stamp? (y/n) ')
+                if flag == 'y':
+                    args.stamp = create_stamp()
+                    initial_epoch = 0
+                    logger.info(f'New stamp {args.stamp} will be created.')
+                elif flag == 'n':
+                    return -1, initial_epoch
+                else:
+                    logger.info(f'You must select \'y\' or \'n\'.')
+                    return -2, initial_epoch
+
+            os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}')
             yaml.dump(
                 vars(args), 
                 open(f'{args.result_path}/{args.task}/{args.stamp}/model_desc.yml', 'w'), 
                 default_flow_style=False)
+        else:
+            logger.info(f'{args.stamp} is not created due to '
+                        f'checkpoint - {args.checkpoint} | '
+                        f'history - {args.history} | '
+                        f'tensorboard - {args.tensorboard}')
 
-    callbacks = []
+    callbacks = [MomentumUpdate(args.momentum, args.num_negative)]
     if args.checkpoint:
         for m in ['query', 'key', 'queue']:
             os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/{m}', exist_ok=True)
-            
-        callbacks.append(MocoModelCheckpoint(
-            filepath=os.path.join(
-                f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
-                '{epoch:04d}_{loss:.4f}_{acc1:.4f}_{acc5:.4f}.h5'),
-            monitor='acc1',
-            mode='max',
-            verbose=1,
-            save_weights_only=True))
+        
+        if args.task in ['v1', 'v2']:
+            callbacks.append(MocoModelCheckpoint(
+                filepath=os.path.join(
+                    f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
+                    '{epoch:04d}_{loss:.4f}_{acc1:.4f}_{acc5:.4f}.h5'),
+                monitor='acc1',
+                mode='max',
+                verbose=1,
+                save_weights_only=True))
+        else:
+            callbacks.append(ModelCheckpoint(
+                filepath=os.path.join(
+                    f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
+                    '{epoch:04d}_{val_loss:.4f}_{val_acc1:.4f}_{val_acc5:.4f}.h5'),
+                monitor='val_acc1',
+                mode='max',
+                verbose=1,
+                save_weights_only=True))
 
     if args.history:
         os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/history', exist_ok=True)
@@ -164,4 +204,4 @@ def create_callbacks(args, metrics=None):
             update_freq=args.tb_interval,
             profile_batch=100,))
 
-    return callbacks
+    return callbacks, initial_epoch
