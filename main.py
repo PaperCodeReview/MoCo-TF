@@ -9,9 +9,8 @@ from common import search_same
 from common import create_stamp
 from dataloader import set_dataset
 from dataloader import DataLoader
-from model import model_dict
-from model import create_model
 from model import MoCo
+from model import set_lincls
 from callback import OptionalLearningRateSchedule
 from callback import create_callbacks
 
@@ -35,35 +34,18 @@ def train_moco(args, logger, initial_epoch, strategy, num_workers):
     # Model & Generator
     ##########################
     with strategy.scope():
-        Trainer = MoCo(
-            logger,
-            backbone=args.backbone,
-            img_size=args.img_size,
-            weight_decay=args.weight_decay,
-            use_bias=args.use_bias,
-            dim=args.dim,
-            K=args.num_negative, 
-            mlp=args.mlp,
-            snapshot=args.snapshot)
+        model = MoCo(args, logger)
 
         lr_scheduler = OptionalLearningRateSchedule(args, steps_per_epoch, initial_epoch)
-        Trainer.compile(
+        model.compile(
             optimizer=tf.keras.optimizers.SGD(lr_scheduler, momentum=.9),
+            loss=tf.keras.losses.sparse_categorical_crossentropy,
             metrics=[tf.keras.metrics.TopKCategoricalAccuracy(1, 'acc1', dtype=tf.float32),
                      tf.keras.metrics.TopKCategoricalAccuracy(5, 'acc5', dtype=tf.float32)],
-            loss=tf.keras.losses.CategoricalCrossentropy(
-                from_logits=True, 
-                reduction=tf.keras.losses.Reduction.NONE, name='loss'),
-            batch_size=args.batch_size,
-            num_negative=args.num_negative,
-            temperature=args.temperature,
-            momentum=args.momentum,
-            shuffle_bn=args.shuffle_bn,
             num_workers=num_workers,
             run_eagerly=True)
-
+    
     train_generator = DataLoader(args, 'train', trainset, args.batch_size, num_workers).dataloader
-
 
     ##########################
     # Train
@@ -75,7 +57,7 @@ def train_moco(args, logger, initial_epoch, strategy, num_workers):
     elif callbacks == -2:
         return
 
-    Trainer.fit(
+    model.fit(
         train_generator,
         epochs=args.epochs,
         callbacks=callbacks,
@@ -106,16 +88,8 @@ def train_lincls(args, logger, initial_epoch, strategy, num_workers):
     # Model & Generator
     ##########################
     with strategy.scope():
-        model = create_model(
-            logger,
-            backbone=args.backbone,
-            img_size=args.img_size,
-            weight_decay=args.weight_decay,
-            use_bias=args.use_bias,
-            lincls=True,
-            classes=args.classes,
-            snapshot=args.snapshot,
-            freeze=args.freeze)
+        backbone = MoCo(args, logger)
+        model = set_lincls(args, backbone.encoder_q)
 
         lr_scheduler = OptionalLearningRateSchedule(args, steps_per_epoch, initial_epoch)
         model.compile(

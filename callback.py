@@ -53,71 +53,6 @@ class OptionalLearningRateSchedule(tf.keras.optimizers.schedules.LearningRateSch
             return self.lr_scheduler(lr_epoch)
 
 
-class MocoModelCheckpoint(ModelCheckpoint):
-    def save_queue(self, filepath, epoch):
-        filepath_add = filepath.replace('checkpoint', 'checkpoint/queue')
-        filepath_add = filepath_add.replace('.h5', '.npy')
-        np.save(filepath_add, self.model.queue.numpy())
-        print('\nEpoch %05d: saving queue to %s' % (epoch + 1, filepath_add))
-        
-    def on_epoch_end(self, epoch, logs=None):
-        self.epochs_since_last_save += 1
-        if self.save_freq == 'epoch':
-            logs = logs or {}
-            if isinstance(self.save_freq, 
-                          int) or self.epochs_since_last_save >= self.period:
-                logs = tf_utils.to_numpy_or_python_type(logs)
-                self.epochs_since_last_save = 0
-                filepath = self._get_file_path(epoch, logs)
-                
-                self.save_queue(filepath, epoch)
-                for m in self.model.layers:
-                    try:
-                        if '_q_' in m.name:
-                            model_name = 'query'
-                        elif '_k_' in m.name:
-                            model_name = 'key'
-                        else:
-                            raise ValueError()
-
-                        filepath_add = filepath.replace('checkpoint', f'checkpoint/{model_name}')
-                        if self.save_best_only:
-                            current = logs.get(self.monitor)
-                            if current is None:
-                                logging.warning('Can save best %s only with %s available, '
-                                                'skipping.' % (model_name, self.monitor))
-                            else:
-                                if self.monitor_op(current, self.best):
-                                    if self.verbose > 0:
-                                        print('\nEpoch %05d: %s improved from %0.5f to %0.5f,'
-                                              ' saving %s to %s' % (epoch + 1, self.monitor, self.best, 
-                                                                    current, model_name, filepath_add))
-                                    self.best = current
-                                    if self.save_weights_only:
-                                        m.save_weights(filepath_add, overwrite=True)
-                                    else:
-                                        m.save(filepath_add, overwrite=True)
-                                else:
-                                    if self.verbose > 0:
-                                        print('\nEpoch %05d: %s did not improve from %0.5f' %
-                                            (epoch + 1, self.monitor, self.best))
-                        else:
-                            if self.verbose > 0:
-                                print('\nEpoch %05d: saving %s to %s' % (epoch + 1, model_name, filepath_add))
-                            if self.save_weights_only:
-                                m.save_weights(filepath_add, overwrite=True)
-                            else:
-                                m.save(filepath_add, overwrite=True)
-
-                        self._maybe_remove_file()
-                    except IOError as e:
-                        # `e.errno` appears to be `None` so checking the content of `e.args[0]`.
-                        if 'is a directory' in six.ensure_str(e.args[0]).lower():
-                            raise IOError('Please specify a non-directory filepath for '
-                                        'ModelCheckpoint. Filepath used is an existing '
-                                        'directory: {}'.format(filepath))
-
-
 class MomentumUpdate(Callback):
     def __init__(self, momentum, num_negative):
         super(MomentumUpdate, self).__init__()
@@ -127,15 +62,27 @@ class MomentumUpdate(Callback):
     def on_batch_end(self, batch, logs=None):
         for layer_q, layer_k in zip(self.model.encoder_q.layers, self.model.encoder_k.layers):
             q_weights = layer_q.get_weights()
-            k_weights = layer_k.get_weights()
-            layer_k.set_weights([k * self.momentum + q * (1.-self.momentum) for q, k in zip(q_weights, k_weights)])
+            if len(q_weights) > 0:
+                k_weights = layer_k.get_weights()
+                layer_k.set_weights([self.momentum * k + (1.-self.momentum) * q for q, k in zip(q_weights, k_weights)])
 
-        key = logs.pop('key')
-        self.model.queue = tf.concat([tf.transpose(key), self.model.queue], axis=-1)
-        self.model.queue = self.model.queue[:,:self.num_negative]
+
+class CustomCSVLogger(CSVLogger):
+    """Save averaged logs during training.
+    """
+    def on_epoch_begin(self, epoch, logs=None):
+        self.batch_logs = {}
+
+    def on_batch_end(self, batch, logs=None):
+        for k, v in logs.items():
+            if k not in self.batch_logs:
+                self.batch_logs[k] = [v]
+            else:
+                self.batch_logs[k].append(v)
 
     def on_epoch_end(self, epoch, logs=None):
-        logs.pop('key')
+        final_logs = {k: np.mean(v) for k, v in self.batch_logs.items()}
+        super(CustomCSVLogger, self).on_epoch_end(epoch, final_logs)
 
 
 def create_callbacks(args, logger, initial_epoch):
@@ -165,16 +112,19 @@ def create_callbacks(args, logger, initial_epoch):
                         f'history - {args.history} | '
                         f'tensorboard - {args.tensorboard}')
 
-    callbacks = [MomentumUpdate(args.momentum, args.num_negative)]
+    callbacks = []
+    if args.task in ['v1', 'v2']:
+        callbacks.append(MomentumUpdate(args.momentum, args.num_negative))
+        
     if args.checkpoint:
         for m in ['query', 'key', 'queue']:
             os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/{m}', exist_ok=True)
         
         if args.task in ['v1', 'v2']:
-            callbacks.append(MocoModelCheckpoint(
+            callbacks.append(ModelCheckpoint(
                 filepath=os.path.join(
                     f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
-                    '{epoch:04d}_{loss:.4f}_{acc1:.4f}_{acc5:.4f}.h5'),
+                    '{epoch:04d}_{loss:.4f}_{acc1:.4f}_{acc5:.4f}'),
                 monitor='acc1',
                 mode='max',
                 verbose=1,
@@ -183,7 +133,7 @@ def create_callbacks(args, logger, initial_epoch):
             callbacks.append(ModelCheckpoint(
                 filepath=os.path.join(
                     f'{args.result_path}/{args.task}/{args.stamp}/checkpoint',
-                    '{epoch:04d}_{val_loss:.4f}_{val_acc1:.4f}_{val_acc5:.4f}.h5'),
+                    '{epoch:04d}_{val_loss:.4f}_{val_acc1:.4f}_{val_acc5:.4f}'),
                 monitor='val_acc1',
                 mode='max',
                 verbose=1,
@@ -191,7 +141,7 @@ def create_callbacks(args, logger, initial_epoch):
 
     if args.history:
         os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/history', exist_ok=True)
-        callbacks.append(CSVLogger(
+        callbacks.append(CustomCSVLogger(
             filename=f'{args.result_path}/{args.task}/{args.stamp}/history/epoch.csv',
             separator=',', append=True))
 

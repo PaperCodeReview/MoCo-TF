@@ -109,7 +109,7 @@ def create_stamp():
     weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     temp = datetime.now()
     return "{:02d}{:02d}{:02d}_{}_{:02d}_{:02d}_{:02d}".format(
-        temp.year // 100,
+        temp.year % 100,
         temp.month,
         temp.day,
         weekday[temp.weekday()],
@@ -140,21 +140,6 @@ def search_same(args):
         for k, v in vars(args).items():
             if k in search_ignore:
                 continue
-
-            if k == 'weight_decay' and k not in desc:
-                desc[k] = 0.
-
-            if k == 'use_bias' and k not in desc:
-                desc[k] = True
-
-            if k == 'freeze' and k not in desc:
-                desc[k] = False
-
-            if k == 'classes' and k not in desc:
-                desc[k] = 1000
-
-            if k == 'tb_histogram' and k not in desc:
-                desc[k] = 0
                 
             if v != desc[k]:
                 # if stamp == '201019_Mon_10_53_03':
@@ -164,13 +149,10 @@ def search_same(args):
         
         if flag:
             args.stamp = stamp
-            try:
-                df = pd.read_csv(
-                    os.path.join(
-                        args.result_path, 
-                        f'{args.task}/{args.stamp}/history/epoch.csv'))
-            except:
-                continue
+            df = pd.read_csv(
+                os.path.join(
+                    args.result_path, 
+                    f'{args.task}/{args.stamp}/history/epoch.csv'))
 
             if len(df) > 0:
                 if int(df['epoch'].values[-1]+1) == args.epochs:
@@ -183,12 +165,11 @@ def search_same(args):
 
                 else:
                     ckpt_list = sorted(
-                        [d for d in os.listdir(
-                            f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/query') if 'h5' in d],
-                        key=lambda x: int(x.split('_')[0]))
+                        [d.split('.index')[0] for d in os.listdir(
+                            f'{args.result_path}/{args.task}/{args.stamp}/checkpoint') if 'index' in d])
                     
                     if len(ckpt_list) > 0:
-                        args.snapshot = f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/query/{ckpt_list[-1]}'
+                        args.snapshot = f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/{ckpt_list[-1]}'
                         initial_epoch = int(ckpt_list[-1].split('_')[0])
                     else:
                         print('{} Training already finished!!!'.format(stamp))

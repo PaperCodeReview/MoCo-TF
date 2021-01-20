@@ -70,25 +70,27 @@ class DataLoader:
         if label is None:
             # moco
             query, key = self.augmentation(img, shape)
-            return {'query': query, 'key': key}
+            inputs = {'query': query, 'key': key}
+            labels = tf.zeros([])
         else:
             # lincls
-            img = self.augmentation(img, shape)
-            label = tf.one_hot(label, self.args.classes)
-            return (img, label)
+            inputs = self.augmentation(img, shape)
+            labels = tf.one_hot(label, self.args.classes)
+        return (inputs, labels)
 
     def shuffle_BN(self, value):
         if self.num_workers > 1:
-            pre_shuffle = [(i, value['key'][i]) for i in range(self.batch_size)]
+            pre_shuffle = [(i, value[0]['key'][i]) for i in range(self.batch_size)]
             random.shuffle(pre_shuffle)
             shuffle_idx = []
             value_temp = []
             for vv in pre_shuffle:
                 shuffle_idx.append(vv[0])
                 value_temp.append(tf.expand_dims(vv[1], axis=0))
-            value['key'] = tf.concat(value_temp, axis=0)
+            value[0]['key'] = tf.concat(value_temp, axis=0)
             unshuffle_idx = np.array(shuffle_idx).argsort().tolist()
-        return (value, unshuffle_idx)
+            value[0].update({'unshuffle': unshuffle_idx})
+        return value
         
     def _dataloader(self):
         self.imglist = self.datalist[:,0].tolist()
