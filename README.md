@@ -45,7 +45,7 @@ python main.py \
     --batch_size 256 \
     --epochs 100 \
     --lr 30 \
-    -- lr_mode constant \
+    --lr_mode constant \
     --data_path /path/of/your/data \
     --snapshot /path/of/checkpoint \
     --gpus gpu id(s) which will be used
