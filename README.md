@@ -12,32 +12,43 @@ For training moco v1,
 ```
 python main.py \
     --task v1 \
-    --dataset imagenet \
+    --weight_decay 0.0001 \
     --brightness 0.4 \
     --contrast 0.4 \
     --saturation 0.4 \
     --hue 0.4 \
+    --lr_mode exponential \
+    --lr_interval 120,160 \
     --data_path /path/of/your/data \
-    --gpus 0
+    --gpus gpu id(s) which will be used
 ```
 or moco v2,
 ```
 python main.py \
     --task v2 \
-    --dataset imagenet \
-    --mlp 128 \
+    --weight_decay 0.0001 \
+    --mlp \
     --brightness 0.4 \
     --contrast 0.4 \
     --saturation 0.4 \
     --hue 0.1 \
     --lr_mode cosine \
     --data_path /path/of/your/data \
-    --gpus 0
+    --gpus gpu id(s) which will be used
 ```
 
 ## Evaluation
-**TODO**
+For training linear classification,
 ```
+python main.py \
+    --task lincls \
+    --batch_size 256 \
+    --epochs 100 \
+    --lr 30 \
+    -- lr_mode constant \
+    --data_path /path/of/your/data \
+    --snapshot /path/of/checkpoint \
+    --gpus gpu id(s) which will be used
 ```
 
 ## Results
