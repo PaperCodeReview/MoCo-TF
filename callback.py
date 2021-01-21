@@ -117,9 +117,6 @@ def create_callbacks(args, logger, initial_epoch):
         callbacks.append(MomentumUpdate(args.momentum, args.num_negative))
         
     if args.checkpoint:
-        for m in ['query', 'key', 'queue']:
-            os.makedirs(f'{args.result_path}/{args.task}/{args.stamp}/checkpoint/{m}', exist_ok=True)
-        
         if args.task in ['v1', 'v2']:
             callbacks.append(ModelCheckpoint(
                 filepath=os.path.join(

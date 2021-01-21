@@ -132,7 +132,7 @@ def search_same(args):
     for stamp in stamps:
         try:
             desc = yaml.full_load(
-                open(f'{args.result_path}/{args.task}/{stamp}/model_desc.yml'))
+                open(f'{args.result_path}/{args.task}/{stamp}/model_desc.yml', 'r'))
         except:
             continue
 
@@ -142,7 +142,7 @@ def search_same(args):
                 continue
                 
             if v != desc[k]:
-                # if stamp == '201019_Mon_10_53_03':
+                # if stamp == '210120_Wed_05_19_52':
                 #     print(stamp, k, desc[k], v)
                 flag = False
                 break
