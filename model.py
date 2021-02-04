@@ -108,7 +108,6 @@ class MoCo(Model):
         self._loss = loss
         self._num_workers = num_workers
         self._is_shufflebn = self.args.shuffle_bn and self._num_workers > 1
-        self._replica_context = tf.distribute.get_replica_context()
 
     def train_step(self, data):
         inputs, labels = data
@@ -145,33 +144,32 @@ class MoCo(Model):
         self.compiled_metrics.update_state(labels, logits)
         results = {m.name: m.result() for m in self.metrics}
         results.update({'loss': loss, 'loss_moco': loss_moco, 'weight_decay': loss_decay})
-        self.update_queue(key)
+        if not 'key' in results:
+            results.update({'key': self.update_queue(key)})
+            
         return results
 
     def concat_fn(self, strategy, key_per_replica):
-        return tf.concat(key_per_replica.values, axis=0)
+        return tf.concat(key_per_replica._values, axis=0)
 
     def unshuffle_bn(self, key, unshuffle_idx):
-        key_all_replica = self._replica_context.merge_call(self.concat_fn, args=(key,))
-        unshuffle_idx_all_replica = self._replica_context.merge_call(self.concat_fn, args=(unshuffle_idx,))
+        _replica_context = tf.distribute.get_replica_context()
+        key_all_replica = _replica_context.merge_call(self.concat_fn, args=(key,))
+        unshuffle_idx_all_replica = _replica_context.merge_call(self.concat_fn, args=(unshuffle_idx,))
         new_key_list = []
         for idx in unshuffle_idx_all_replica:
             new_key_list.append(tf.expand_dims(key_all_replica[idx], axis=0))
         key_orig = tf.concat(tuple(new_key_list), axis=0)
-        key = key_orig[(self.args.batch_size//self._num_workers)*(self._replica_context.replica_id_in_sync_group):
-                        (self.args.batch_size//self._num_workers)*(self._replica_context.replica_id_in_sync_group+1)]
+        key = key_orig[(self.args.batch_size//self._num_workers)*(_replica_context.replica_id_in_sync_group):
+                        (self.args.batch_size//self._num_workers)*(_replica_context.replica_id_in_sync_group+1)]
         return key
 
     def reduce_key(self, key):
-        key_all_replica = self._replica_context.merge_call(self.concat_fn, args=(key,))
-        new_key_list = []
-        for v in key_all_replica.values():
-            new_key_list.append(tf.expand_dims(v, axis=0))
-        all_key = tf.concat(tuple(new_key_list), axis=0)
+        _replica_context = tf.distribute.get_replica_context()
+        all_key = _replica_context.merge_call(self.concat_fn, args=(key,))
         return all_key
 
     def update_queue(self, key):
         if self._num_workers > 1:
             key = self.reduce_key(key)
-        self.queue = tf.concat([tf.transpose(key), self.queue], axis=-1)
-        self.queue = self.queue[:,:self.args.num_negative]
+        return key

@@ -66,6 +66,10 @@ class MomentumUpdate(Callback):
                 k_weights = layer_k.get_weights()
                 layer_k.set_weights([self.momentum * k + (1.-self.momentum) * q for q, k in zip(q_weights, k_weights)])
 
+        key = logs.pop('key')
+        self.model.queue = tf.concat([tf.transpose(key), self.model.queue], axis=-1)
+        self.model.queue = self.model.queue[:,:self.num_negative]
+
 
 class CustomCSVLogger(CSVLogger):
     """Save averaged logs during training.
